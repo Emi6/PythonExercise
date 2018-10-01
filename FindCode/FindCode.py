@@ -3,57 +3,40 @@ import requests
 import re
 import pymongo
 import itchat
-# connection = pymongo.MongoClient('127.0.0.1',27017)
-# tdb = connection.MyData
-# post = tdb.test
-import pandas as pd
-from PIL.PngImagePlugin import iTXt
-from pandas import DataFrame
-from lxml import etree
-from urllib.request import urlopen
-import urllib.request
-from bs4 import BeautifulSoup
-import psutil
 from apscheduler.schedulers.blocking import BlockingScheduler
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from collections import Counter
-# from selenium import webdriver
-# import sys
-import json
-# reload(sys)
-# sys.setdefaultencoding('utf-8')
-#https://www.jianshu.com/p/4c6387c650dc
+
+# 读取 cookie
 def getcookie(filename):
-    # cookie=open(r'filename','r')#打开所保存的cookies内容文件
     cookie = open(filename, 'r')
     cookies={}#初始化cookies字典变量
     for line in cookie.read().split(';'):   #按照字符：进行划分读取 #其设置为1就会把字符串拆分成2份
-
         name,value=line.strip().split('=',1)
         cookies[name]=value  #为字典cookies添加内容
     return cookies
+
+# 读取 html
 def gethtml(url,filename):
     headers={
         "User-Agent":"Mozilla/5.0 (Windows NT 10.0column; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36",
             }
     response = requests.get(url, headers=headers, cookies=getcookie(filename), timeout=30)
     return response
+
+# 取回 json 文件
 def init(i,User):
     url = 'https://xueqiu.com/v4/statuses/user_timeline.json?page={page}&user_id={user}'
     url=url.format(page=i,user=User)
     response = gethtml(url, 'cookie.txt')
     page = response.json()
-    # print(page)
     return page
-    # print(page)
 
+# 分析 json 页面，处理 TimeUpper 和 TimeLower
 def analyze(page):
     try:
-
-    # print(page)
         statuses=page['statuses']
         count=page['count']
-        # print(statuses[1]["text"])
         TimeUpper=statuses[1]["timeBefore"]
         TimeLower=statuses[count-1]["timeBefore"]
         TimeUpper = TimeUpper.replace('-', '')
@@ -64,58 +47,49 @@ def analyze(page):
             TimeLower='2018'+TimeLower
         if len(TimeUpper) == 4:
             TimeUpper = '2018' + TimeUpper
-        # print(TimeUpper)
         special=str('今天')
-        if TimeUpper==special:
-            TimeUpper = datetime.now().strftime("%Y-%m-%d")
+        special_2=str('分钟前')
+        if TimeUpper==special or TimeUpper==special_2 :
+            utc_d = datetime.utcnow().replace(tzinfo=timezone.utc)
+            utc_dt = utc_d.astimezone(timezone(timedelta(hours=8)))
+            TimeUpper = utc_dt.strftime("%Y-%m-%d")
             TimeUpper = TimeUpper.replace('-', '')
-        if TimeLower == special:
-            TimeLower = datetime.now().strftime("%Y-%m-%d")
+        if TimeLower == special or TimeLower == special_2:
+            utc_d = datetime.utcnow().replace(tzinfo=timezone.utc)
+            utc_dt = utc_d.astimezone(timezone(timedelta(hours=8)))
+            TimeLower = utc_dt.strftime("%Y-%m-%d")
             TimeLower = TimeLower.replace('-', '')
-            # TimeUpper = TimeUpper.split()[0]
-
         return TimeLower, TimeUpper,statuses
     except Exception as e:
         pass
 
+# 爬取某日的雪球内容
 def comparison(User,strday,TimeUpper,TimeLower,statuses,t,Name):
     d = list()
-    print(TimeUpper,TimeLower)
     try:
-
         if strday>TimeUpper:
-            print("it is a remark")
             return None
         elif TimeLower<strday<=TimeUpper:
             c=FindDay(User,statuses,strday,Name)
             d.extend(c)
-            print('it is a remark2/3')
-            print(2)
-            print(d)
             return d
         elif strday<=TimeLower:
             c=FindDay(User,statuses,strday,Name)
             d=c
-            print("d=")
-            print(d)
             t=t+1
-            # Read(t, User, strday, Name)
             page = init(t,User)
             TimeLower, TimeUpper, statuses=analyze(page)
             z=comparison(User,strday, TimeUpper, TimeLower, statuses, t,Name)
-            print(z)
             if d is None:
                 d=list()
                 d.extend(z)
             else:
                 d.extend(z)
-            print('it is a remark3/3')
-            print(3)
             return d
     except Exception as e:
-         print('pass')
          pass
 
+# 爬取某日的股票代码信息
 def FindDay(User,statuses,strday,Name):
     connection = pymongo.MongoClient('127.0.0.1', 27017)
     tdb = connection.MyData
@@ -123,54 +97,37 @@ def FindDay(User,statuses,strday,Name):
     c=list()
     for i in statuses:
        a=list()
-
-
        text=i["text"]
        timeBefore=i["timeBefore"]
        timeBefore_modify = timeBefore.replace('-', '')
        timeBefore_modify = timeBefore_modify.split()[0]
        if len(timeBefore_modify)==4:
            timeBefore_modify='2018'+timeBefore_modify
-       # print(timeBefore_modify)
        if strday == timeBefore_modify and re.findall('\$(.*?)\$', text) :
-           # print(timeBefore)
            l = len(re.findall('\$(.*?)\$', text))
-           print(len(re.findall('\$(.*?)\$', text)))
            a.append(timeBefore)
            a.append(re.findall('\$(.*?)\$', text)[0:])
-           print("a=")
-           print(a)
-           # c.append(a[1])
-           # print(c)
            for num in range(0,l):
                 post.insert({'名字':str(Name[User]), "时间": a[0], "股票代码": a[1][num]})
                 c.append(a[1][num])
-
     if len(c):
-        print(c)
+        # print(c)
         return c
-
     else:
         return None
            # itchat.send( '名字 '+str(Name[User])+'\n'+'时间 '+a[0]+'\n'+'股票代码 ' + a[1], 'filehelper')
 
+# 主程序
 def Read(t,User,strday,Name):
     try:
         page=init(t,User)
-        print(User)
         TimeLower, TimeUpper, statuses=analyze(page)
         fan=comparison(User, strday, TimeUpper, TimeLower, statuses, t, Name)
-        # print(d)
         print(fan)
         return fan
     except:
         pass
 def job():
-    # itchat.auto_login(hotReload=True)
-    # connection = pymongo.MongoClient('127.0.0.1', 27017)
-    # tdb = connection.MyData
-    # post = tdb.test
-    # post.insert({'name': "李白", "age": 1, "skill": 2})
     User = [5171159182, 'assistant', 'huodong', 'fangtan', 9485866208,
             8152922548, 'xueyingzhengquan', 2709857861, 5828665454, 3748823499,
             5964068708, 9887656769, 6785033954, 9528220473, 8255849716,
@@ -348,27 +305,28 @@ def job():
             1608596039: 'Leo牛'}
     t = 1
     strday = '20180925'
-    print(datetime.now().strftime("%Y-%m-%d"))
     e=list()
+    lth=len(User)
+    n=1
     for z in User:
+        print(str(n)+'/'+str(lth)+'正在爬取'+str(z))
         d=Read(t, z,strday,Name)
         try:
             e.extend(d)
-            print("e=")
-            print(e)
         except:
             pass
-
+        n=n+1
     return e
-
-    # for z in User:
-    #     Read(t, z,strday,Name)
 # scheduler = BlockingScheduler()
 # scheduler.add_job(job, 'cron', day_of_week='0-6', hour=15, minute=34)
 # scheduler.start()
 if __name__=="__main__":
     e=job()
+    print("提及的代码为 " + ' '.join(e))
     print(Counter(e))
+    # itchat.auto_login(hotReload = True)  # 可设置hotReload = True
+    # itchat.run()
+    # itchat.send(Counter(e), 'filehelper')
 
 
 
